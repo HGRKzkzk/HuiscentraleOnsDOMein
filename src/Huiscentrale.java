@@ -55,7 +55,7 @@ class Huiscentrale {
             output = port.getOutputStream();
             //create an inputstream.
             input = port.getInputStream();
-            //set the baudrate to the same as the arduino
+            //set the baudrate to the same as the arduino is set to
             port.setBaudRate(57600);
             System.out.println("OutputStream established.");
             System.out.println("InputStream established.");
@@ -70,15 +70,8 @@ class Huiscentrale {
         String[] messageSplit = message.split(";", 0);
         //checks if the message has the correct format
         if (messageSplit.length == 3) {
-            String actionType = "";
 
-            if (messageSplit[0].equals("setHc")) {
-                actionType = "1";
-            } else if (messageSplit[0].equals("getHc")) {
-                actionType = "2";
-            }
-
-            String outputToArduino = "<" + actionType + ":" + messageSplit[2] + ">";
+            String outputToArduino = messageSplit[2];
 
             System.out.println("Sending to Arduino: " + outputToArduino);
             try {
@@ -88,10 +81,7 @@ class Huiscentrale {
                 System.out.println("sending serial message to arduino failed");
             }
 
-            //TODO: handle response from Arduino
-
-
-//            reactionFromArduino = "Arduino received your message and says hi!";
+            //TODO: handle response from Arduino (is nu nog dezelfde booschap als ontvangen is gewoon terug gestuurd)
 
             reactionFromArduino = messageSplit[2];
 
