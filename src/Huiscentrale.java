@@ -55,7 +55,7 @@ class Huiscentrale {
             output = port.getOutputStream();
             //create an inputstream.
             input = port.getInputStream();
-            //set the baudrate to the same as the arduino is set to
+            //set the baudrate to the same as the arduino
             port.setBaudRate(57600);
             System.out.println("OutputStream established.");
             System.out.println("InputStream established.");
