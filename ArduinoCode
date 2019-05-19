@@ -1,0 +1,277 @@
+/*
+
+  Opzet voor een simpel protocol voor communicatie vanuit Java volgens de volgende opzet:
+  < welkePin, welkeActie, welkeWaarde >
+
+  Daarnaast biedt deze sketch ook een basis invulling van de inputs die via de MFS zijn aan te spreken (de knoppen en de potmeter) en mogelijkheden om de
+  waardes hiervan naar de buitenwereld toe kenbaar te maken (op dit moment nog heel basic / WIP; zeker voor de potentiometer).
+
+*/
+
+#include <TimerOne.h>
+#include <Wire.h>
+#include <MultiFuncShield.h>
+
+#define LED_1 13
+#define LED_2 12
+#define LED_3 11
+#define LED_4 10
+#define BUZZER 3
+#define POTMETER A0
+#define BUTTON_1 A1
+#define BUTTON_2 A2
+#define BUTTON_3 A3
+#define DISP_LATCH 4
+#define DISP_CLK 7
+#define DISP_DATA 8
+
+//vars die als systeeminstellingen fungeren.
+const long baudRate = 57600;
+const long stdSleepTime = 0; //deze moet overeenkomen met de tijd die de Arduino nodig heeft om operationeel te worden.
+
+
+// Vars met betrekking tot het ontvangen en afhandelen van data.
+const char startMarker = '<';
+const char endMarker = '>';
+const byte numChars = 32;
+char receivedChars[numChars];
+char tempChars[numChars];        // temporary array for use by strtok() function
+boolean newData = false;
+
+
+//vars met betrekking tot de output / het verzenden va
+const char startChar[] = "<<";
+const char endChar[] = ">>";
+
+
+// Variabelen om te vullen met ontvangen data, om daarna mee aan de slag te gaan.
+int receivedPin = 0;
+int receivedAction = 0;
+int receivedValue = 0;
+
+// vars voor knoppen-functionaliteit
+int buttonState = 0;
+int lastButtonState = 0;
+boolean isPressed = false;
+const int btnDelay = 150;
+
+// vars voor de potmeter
+int potValue;
+int newPotValue;
+const int minDifference = 7;
+
+
+void setup() {
+  delay(stdSleepTime);
+  initArduino();
+  sendSystemOnlineMessage();
+}
+
+
+//Functionaliteit om de Arduino te initialiseren, de baudrate in te stellen, de library functies te initialiseren, alsook de pins, etc.
+void initArduino() {
+  Serial.begin(baudRate);
+  Timer1.initialize();
+  MFS.initialize(&Timer1);
+  MFS.write(""); // lege LCD display
+  initPins();
+  setPins();
+}
+
+// Laten weten dat we er zijn.
+void sendSystemOnlineMessage() {
+  Serial.println("System online!");
+}
+
+//Functie om binnen de Arduino de pins met hun naam te kunnen aanspreken, en per element aan te geven of het input of output is.
+void initPins() {
+  pinMode(POTMETER, INPUT);
+  int potValue =  analogRead(POTMETER);
+
+  pinMode(LED_1, OUTPUT);
+  pinMode(LED_2, OUTPUT);
+  pinMode(LED_3, OUTPUT);
+  pinMode(LED_4, OUTPUT);
+
+  pinMode(BUTTON_1, INPUT);
+  pinMode(BUTTON_2, INPUT);
+  pinMode(BUTTON_3, INPUT);
+
+  digitalWrite(BUTTON_1, HIGH);
+  digitalWrite(BUTTON_2, HIGH);
+  digitalWrite (BUTTON_3, HIGH);
+
+  pinMode(DISP_LATCH, OUTPUT);
+  pinMode(DISP_CLK, OUTPUT);
+  pinMode(DISP_DATA, OUTPUT);
+}
+
+//Functie om (waar nodig / wenselijk) de standaardwaarde van pins in te geven.
+void setPins() {
+  digitalWrite(LED_1, HIGH);
+  digitalWrite(LED_2, HIGH);
+  digitalWrite(LED_3, HIGH);
+  digitalWrite(LED_4, HIGH);
+}
+
+void loop() {
+  //knoppen als aan/uit schakelaar instellen
+  button(BUTTON_1);
+  button(BUTTON_2);
+  button(BUTTON_3);
+
+  //potmeter als potmeter instellen
+  potmeter(POTMETER);
+
+  // Actie ondernemen op het moment dat er nieuwe data binnenkomt
+  recvWithStartEndMarkers();
+  if (newData == true) {
+    strcpy(tempChars, receivedChars);
+    parseData();
+    showParsedData();
+    newData = false;
+  } 
+}
+
+
+/* Knoppen als aan/uit schakelaar gebruiken. Met als kantekening dat als je de knop langer dan de opgegeven delay ingedrukt houdt die
+  functionaliteit niet helemaal opgaat. Kan / zal eventueel nog aangepast worden mocht dit nodig blijken.
+
+  Geeft de status alsvolgt terug: B welkeKnop S aanOfUit, bv als B5S0.
+
+*/
+void button(int button) {
+  buttonState = digitalRead(button);
+  if (buttonState != lastButtonState) {
+    if (buttonState == HIGH) {
+      Serial.print("B");
+      Serial.print(button);
+      Serial.print("S");
+      Serial.print(isPressed);
+      isPressed = !isPressed;
+    }
+    delay(btnDelay);
+  }   lastButtonState = buttonState;
+}
+
+/* Functie om de potmeter uit te lezen en de waarde te verzenden. Om deze beter bruikbaar te maken moet er nog gekeken hoe de analoge waarde gemapped moet worden
+  naar meer bruikbare waardes, en wat een handige treshold is (zonder treshold krijg je constant waardes terug omdat deze constant fluctueren, zó analoog). */
+void potmeter(int potmeter) {
+  newPotValue = analogRead(POTMETER);
+  // map(value, fromLow, fromHigh, toLow, toHigh)
+  if (abs(newPotValue - potValue) > minDifference)
+  {
+    // Serial.print("POT");
+    // Serial.print(newPotValue);
+    potValue = newPotValue;
+    delay(2);
+  }
+}
+
+
+
+
+/* Deze functie gaat, op het moment dat er data aan de Arduino wordt aangeboden, deze data inlezen vanaf het vooraf vastelegde start-karakter tot aan het
+  karakter dat is vastgesteld om als "einde boodschap" karakter te fungeren.  */
+void recvWithStartEndMarkers() {
+  static boolean recvInProgress = false;
+  static byte ndx = 0;
+
+  char rc;
+
+  while (Serial.available() > 0 && newData == false) {
+    rc = Serial.read();
+
+    if (recvInProgress == true) {
+      if (rc != endMarker) {
+        receivedChars[ndx] = rc;
+        ndx++;
+        if (ndx >= numChars) {
+          ndx = numChars - 1;
+        }
+      }
+      else {
+        receivedChars[ndx] = '\0'; // terminate the string
+        recvInProgress = false;
+        ndx = 0;
+        newData = true;
+      }
+    }
+
+    else if (rc == startMarker) {
+      recvInProgress = true;
+    }
+  }
+}
+
+
+// Functionaliteit om de via recvWithStartEndMarkers in gelezen data in delen op te splitsen.
+void parseData() {
+  char * strtokIndx; // this is used by strtok() as an index
+
+  // eerste deel, dus vanaf de <
+  strtokIndx =  strtok(tempChars, ",");
+  receivedPin = atoi(strtokIndx);
+  //twee deel, vanaf de eerste komma
+  strtokIndx =  strtok(NULL, ",");
+  receivedAction = atoi(strtokIndx);
+  //derde deel, vanaf de tweede komma
+  strtokIndx =  strtok(NULL, ",");
+  receivedValue = atoi(strtokIndx);
+}
+
+
+/* Functionaliteit om de via recvWithStartEndMarkers en met parseData opgesplitste data in de praktijk toe te passen / te vertalen
+  naar corresponderende acties. */
+
+void showParsedData() {
+  //Moet nog kijken of nested switch statements hier de meest praktische oplossing is.
+
+  switch (receivedAction) {
+    case 0: // alleen status opvragen
+    MFS.write("");
+      switch (receivedValue) {
+        case 999:
+          Serial.print("Hoepla!");
+          break;
+
+        default:
+          returnPinStatus(receivedPin);
+          break;
+      }
+      break;
+
+
+    case 1: // Pin naar high of low omzetten
+   MFS.write("");
+      switch (receivedValue) {
+        case 0: digitalWrite(receivedPin, HIGH);
+          returnPinStatus(receivedPin);
+          break;
+
+        case 1: digitalWrite(receivedPin, LOW);
+          returnPinStatus(receivedPin);
+          break;
+      }
+
+      break;
+
+
+
+    case 3: // lamp "dimmen"
+      MFS.write(receivedValue);
+      break;
+
+  }
+}
+
+
+void returnPinStatus(int receivedPin) {
+  Serial.print(startChar);
+  Serial.print(receivedPin);
+  Serial.print(",");
+  Serial.print(digitalRead(receivedPin));
+
+  Serial.print(endChar);
+
+}
